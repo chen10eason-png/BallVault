@@ -231,10 +231,66 @@ const TYPES = {
  other:{label:"其他",icon:"⭐",desc:"自訂收藏類型"}
 };
 const STORAGE="ballvault_v1";
-let balls=JSON.parse(localStorage.getItem(STORAGE)||"[]");
+const DB_NAME="BALLVAULT_DB";
+const DB_VERSION=1;
+const DB_STORE="collection";
+let balls=[];
 let editingId=null, selectedType="signed", pendingPhotos=[];
 
-function saveStore(){localStorage.setItem(STORAGE,JSON.stringify(balls));}
+function openBallVaultDB(){
+ return new Promise((resolve,reject)=>{
+  if(!window.indexedDB){reject(new Error("IndexedDB unavailable"));return}
+  const req=indexedDB.open(DB_NAME,DB_VERSION);
+  req.onupgradeneeded=()=>{
+   const db=req.result;
+   if(!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+  };
+  req.onsuccess=()=>resolve(req.result);
+  req.onerror=()=>reject(req.error||new Error("IndexedDB open failed"));
+ });
+}
+
+async function loadStore(){
+ try{
+  const db=await openBallVaultDB();
+  const data=await new Promise((resolve,reject)=>{
+   const tx=db.transaction(DB_STORE,"readonly");
+   const req=tx.objectStore(DB_STORE).get("balls");
+   req.onsuccess=()=>resolve(req.result);
+   req.onerror=()=>reject(req.error);
+  });
+  db.close();
+  if(Array.isArray(data)){balls=data;return}
+  // One-time migration from the previous LocalStorage version.
+  const old=JSON.parse(localStorage.getItem(STORAGE)||"[]");
+  balls=Array.isArray(old)?old:[];
+  await saveStore();
+ }catch(err){
+  console.warn("BALLVAULT persistent database unavailable; using LocalStorage fallback.",err);
+  try{balls=JSON.parse(localStorage.getItem(STORAGE)||"[]");if(!Array.isArray(balls))balls=[];}catch(_){balls=[];}
+ }
+}
+
+async function saveStore(){
+ const snapshot=JSON.stringify(balls);
+ // Keep a LocalStorage mirror as a fallback for browsers where IndexedDB is unavailable.
+ try{localStorage.setItem(STORAGE,snapshot);}catch(err){console.warn("LocalStorage mirror unavailable",err)}
+ try{
+  const db=await openBallVaultDB();
+  await new Promise((resolve,reject)=>{
+   const tx=db.transaction(DB_STORE,"readwrite");
+   tx.objectStore(DB_STORE).put(balls,"balls");
+   tx.oncomplete=resolve;
+   tx.onerror=()=>reject(tx.error||new Error("IndexedDB write failed"));
+   tx.onabort=()=>reject(tx.error||new Error("IndexedDB write aborted"));
+  });
+  db.close();
+  return true;
+ }catch(err){
+  console.warn("IndexedDB save failed; LocalStorage mirror retained.",err);
+  return true;
+ }
+}
 function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function fmtDate(v){if(!v)return "未記錄日期"; const d=new Date(v+"T00:00:00"); return isNaN(d)?"":d.toLocaleDateString("zh-TW",{year:"numeric",month:"short",day:"numeric"});}
@@ -331,7 +387,7 @@ function renderPhotoPreview(){
  el.classList.add("show");el.innerHTML=pendingPhotos.map(x=>`<img src="${x}">`).join("");
 }
 function val(id){return document.getElementById("f_"+id)?.value?.trim()||""}
-function saveBall(e){
+async function saveBall(e){
  e.preventDefault();
  const wasEditing=!!editingId;
  const old=balls.find(x=>x.id===editingId);
@@ -339,7 +395,7 @@ function saveBall(e){
  ["number","proof","opponent","league","season","version","event"].forEach(k=>{const x=document.getElementById("f_"+k);if(x)b[k]=x.value.trim()});
  if(!old)b.createdAt=b.updatedAt;
  if(editingId)balls=balls.map(x=>x.id===editingId?b:x);else balls.unshift(b);
- saveStore();
+ await saveStore();
  closeModal();
  renderAll();
  goByName("home");
@@ -407,19 +463,19 @@ function detail(id){
  window.scrollTo({top:0,behavior:"smooth"});
 }
 function info(a,b){return `<div class="info-line"><span>${esc(a)}</span><span>${esc(b)}</span></div>`}
-function toggleFav(id){balls=balls.map(b=>b.id===id?{...b,favorite:!b.favorite}:b);saveStore();renderAll();toast(balls.find(b=>b.id===id).favorite?"已加入最愛":"已取消最愛");}
+async function toggleFav(id){balls=balls.map(b=>b.id===id?{...b,favorite:!b.favorite}:b);await saveStore();renderAll();toast(balls.find(b=>b.id===id).favorite?"已加入最愛":"已取消最愛");}
 function toggleFavFromDetail(id){toggleFav(id);detail(id);}
-function duplicateBall(id){
+async function duplicateBall(id){
  const original=balls.find(b=>b.id===id);
  if(!original)return;
  const copy={...original,id:uid(),title:(original.title||TYPES[original.type]?.label||"棒球收藏")+"（複製）",favorite:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),photos:[...(original.photos||[])]};
  balls.unshift(copy);saveStore();renderAll();detail(copy.id);toast("已複製收藏");
 }
-function deleteBall(id){if(!confirm("確定要刪除這顆收藏嗎？此操作無法復原。"))return;balls=balls.filter(b=>b.id!==id);saveStore();goByName("collection");renderAll();toast("收藏已刪除");}
+async function deleteBall(id){if(!confirm("確定要刪除這顆收藏嗎？此操作無法復原。"))return;balls=balls.filter(b=>b.id!==id);await saveStore();goByName("collection");renderAll();toast("收藏已刪除");}
 function exportData(){
  const blob=new Blob([JSON.stringify(balls,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ballvault-collection.json";a.click();URL.revokeObjectURL(a.href);toast("收藏資料已匯出");
 }
-renderAll();
+loadStore().then(()=>renderAll());
 </script>
 </body>
 </html>
