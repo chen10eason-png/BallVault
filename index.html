@@ -333,12 +333,17 @@ function renderPhotoPreview(){
 function val(id){return document.getElementById("f_"+id)?.value?.trim()||""}
 function saveBall(e){
  e.preventDefault();
+ const wasEditing=!!editingId;
  const old=balls.find(x=>x.id===editingId);
  const b={...(old||{}),id:editingId||uid(),type:selectedType,title:val("title"),player:val("player"),team:val("team"),date:val("date"),location:val("location"),method:val("method"),notes:val("notes"),photos:pendingPhotos.length?pendingPhotos:(old?.photos||[]),updatedAt:new Date().toISOString()};
  ["number","proof","opponent","league","season","version","event"].forEach(k=>{const x=document.getElementById("f_"+k);if(x)b[k]=x.value.trim()});
  if(!old)b.createdAt=b.updatedAt;
  if(editingId)balls=balls.map(x=>x.id===editingId?b:x);else balls.unshift(b);
- saveStore();closeModal();renderAll();toast(editingId?"收藏已更新":"已加入收藏");
+ saveStore();
+ closeModal();
+ renderAll();
+ goByName("home");
+ toast(wasEditing?"收藏已更新":"已加入收藏");
 }
 function renderAll(){renderHome();renderCollection();renderFavorites();renderPeople("player");renderPeople("team");renderAnalytics();populateTypeFilter();}
 function card(b){
@@ -395,7 +400,7 @@ function detail(id){
  const b=balls.find(x=>x.id===id);if(!b)return;const t=TYPES[b.type]||TYPES.other;
  document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));document.getElementById("page-detail").classList.add("active");
  document.querySelectorAll(".nav-item").forEach(x=>x.classList.remove("active"));
- document.getElementById("detail").innerHTML=`<div class="hero"><div><div class="eyebrow">${t.icon} ${t.label}</div><h1>${esc(b.title||t.label)}</h1><p class="subtitle">${esc([b.player,b.team].filter(Boolean).join(" · "))}</p></div><div class="top-actions"><button class="ghost-btn" onclick="openAdd(balls.find(x=>x.id==='${b.id}'))">編輯</button><button class="ghost-btn" onclick="deleteBall('${b.id}')">刪除</button></div></div>
+ document.getElementById("detail").innerHTML=`<div class="hero"><div><div class="eyebrow">${t.icon} ${t.label}</div><h1>${esc(b.title||t.label)}</h1><p class="subtitle">${esc([b.player,b.team].filter(Boolean).join(" · "))}</p></div><div class="top-actions"><button class="ghost-btn" onclick="toggleFavFromDetail('${b.id}')">${b.favorite?"★ 已收藏":"☆ 收藏"}</button><button class="ghost-btn" onclick="duplicateBall('${b.id}')">＋ 複製</button><button class="ghost-btn" onclick="openAdd(balls.find(x=>x.id==='${b.id}'))">編輯</button><button class="ghost-btn" onclick="deleteBall('${b.id}')">刪除</button></div></div>
  <div class="detail-grid"><div class="detail-card"><div class="detail-photo">${b.photos?.[0]?`<img src="${b.photos[0]}">`:`<div class="photo-placeholder">${t.icon}</div>`}</div></div>
  <div class="detail-card"><h3 style="margin-top:0">收藏資料</h3>${info("收藏類型",t.label)}${b.player?info("球員",b.player):""}${b.team?info("球隊",b.team):""}${b.number?info("背號","#"+b.number):""}${b.opponent?info("對戰球隊",b.opponent):""}${b.league?info("聯盟",b.league):""}${b.season?info("年份",b.season):""}${b.version?info("版本",b.version):""}${b.date?info("日期",fmtDate(b.date)):""}${b.location?info("地點",b.location):""}${b.method?info("取得方式",b.method):""}${b.proof?info("簽名證明",b.proof):""}</div>
  <div class="detail-card" style="grid-column:1/-1"><h3 style="margin-top:0">收藏故事</h3><p style="line-height:1.8;color:#475467;white-space:pre-wrap">${esc(b.notes||"還沒有寫下故事。")}</p></div></div>`;
@@ -403,6 +408,13 @@ function detail(id){
 }
 function info(a,b){return `<div class="info-line"><span>${esc(a)}</span><span>${esc(b)}</span></div>`}
 function toggleFav(id){balls=balls.map(b=>b.id===id?{...b,favorite:!b.favorite}:b);saveStore();renderAll();toast(balls.find(b=>b.id===id).favorite?"已加入最愛":"已取消最愛");}
+function toggleFavFromDetail(id){toggleFav(id);detail(id);}
+function duplicateBall(id){
+ const original=balls.find(b=>b.id===id);
+ if(!original)return;
+ const copy={...original,id:uid(),title:(original.title||TYPES[original.type]?.label||"棒球收藏")+"（複製）",favorite:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),photos:[...(original.photos||[])]};
+ balls.unshift(copy);saveStore();renderAll();detail(copy.id);toast("已複製收藏");
+}
 function deleteBall(id){if(!confirm("確定要刪除這顆收藏嗎？此操作無法復原。"))return;balls=balls.filter(b=>b.id!==id);saveStore();goByName("collection");renderAll();toast("收藏已刪除");}
 function exportData(){
  const blob=new Blob([JSON.stringify(balls,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ballvault-collection.json";a.click();URL.revokeObjectURL(a.href);toast("收藏資料已匯出");
